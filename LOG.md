@@ -348,7 +348,7 @@ rest 5 at a time to 37.
 133, 119.5 … — the most expensive dishes first. `price-desc` returned
 16.5, 21, 23, 26 … — the cheapest first. Same thing in the browser:
 picking "Price: low to high" in the sort dropdown showed the expensive
-dishes at the top of the grid. (`backend/test/reproduce.js` prints
+dishes at the top of the grid. (`backend/scripts/reproduce.js` prints
 this comparison.)
 
 **Cause:** The sort table in `backend/logic/search.js` had the two
@@ -476,3 +476,34 @@ reaches the decrement (pricing rejects it first), and ordering with
 no coupon does not touch the counter.
 
 **Time:** ~15 minutes.
+
+### Extra: a regression test (`npm test`)
+
+`backend/test/regression.test.js` is a `node:test` suite (no new
+dependencies — Node has had a test runner and fetch built in for
+years) that boots the real server as a child process on a free port
+with `TZ=UTC` so the canteen is open, drives it over HTTP exactly as
+the browser does, and restores `menu.json`/`coupons.json` afterwards.
+`npm test` in `backend/` runs it.
+
+It covers every backend rule from the log plus the two extra fixes:
+sort order, one page per request, expired-coupon rejection (and that
+a valid coupon still works), refusing quantities above stock without
+touching stock, restoring stock on cancel, listing orders by
+`memberId`, and coupon uses being spent exactly once per order —
+including that replaying an idempotency key does not spend a second
+use and cancelling gives the use back.
+
+**Proof it is a regression test:** I checked out the original commit
+(`0b2f232`) into a temporary `git worktree`, copied the suite in, and
+ran it against the unfixed code with the main repo's `node_modules`
+on `NODE_PATH`. Result: **7 of 8 tests fail** (only "a valid coupon
+still works" passes — it asserts behaviour that was never broken).
+Against the fixed tree: **8 of 8 pass**, including a second
+consecutive run with the first run's data still in place, which
+caught a bug in my own first draft — a fixed idempotency key collided
+with the previous run's order and the server (correctly) replayed it
+instead of placing a new one. The key is now generated per run.
+
+**Time:** ~45 minutes, including the fails-before run and fixing my
+own test bug.

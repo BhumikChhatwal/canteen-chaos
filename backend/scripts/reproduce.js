@@ -1,10 +1,11 @@
 // reproduce.js - hands-on reproduction of the backend complaints.
 // Start the server first (TZ=UTC so the canteen is open), then:
 //
-//   node test/reproduce.js
+//   node scripts/reproduce.js
 //
 // It prints what actually happens next to what the complaint says should
-// happen. Nothing here fixes anything; it only observes.
+// happen. Nothing here fixes anything; it only observes. (The automatic
+// checks live next door in test/regression.test.js - run npm test.)
 
 const BASE = process.env.BASE || 'http://localhost:3000';
 
@@ -119,7 +120,7 @@ async function main() {
     );
   }
 
-  console.log(`\n(order from CC-06 left as ${orderToken}; reset with: git checkout -- backend/data/)`);
+  if (orderToken) console.log(`\n(CC-06 order left as ${orderToken}; reset with: git checkout -- backend/data/)`);
 }
 
 main().catch((err) => {
