@@ -39,6 +39,50 @@ order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
 make sure points and coupon uses are refunded elsewhere and this
 function should only ever touch stock.
 
+## CC-05 — "The category bar scrolls away on my phone"
+
+**Reproduced:** At a 400×800 viewport (≤480px, phone) I scrolled to
+y=600 and measured: `.filters` was at viewport `[-507, -275]` — the
+whole bar (search, chips, categories) had scrolled off the top. It
+never stuck. `.site-header` correctly stayed at [0, 93].
+
+**Cause:** Two things, both in `frontend/style.css`:
+1. `@media (max-width: 480px) { .view { overflow-x: hidden; } }`.
+   `overflow: hidden` on an ancestor turns it into the scroll
+   container for its sticky descendants. `.filters` is sticky inside
+   `.view`, but `.view` itself is not the thing scrolling (the page
+   is), so the bar had nothing to stick to and travelled with the
+   content. This rule only exists below 480px — which is why the
+   complaint says "on smaller screens". It was also masking real
+   horizontal overflow (see CC-03) rather than letting it show.
+2. With that gone, `.filters { top: 0 }` would stick the bar *under*
+   the sticky `.site-header` (z-index 50, 93px tall, also `top: 0`),
+   so the bar would stay "stuck" but invisible — I confirmed this
+   overlap exists on desktop today: at scrollY 298 on a 1280px
+   window the filter bar sits at [0, 106] behind the header [0, 93],
+   and `elementFromPoint` on the search box returns the header's
+   brand text. That is the same defect the phone reporter sees from
+   the other side.
+
+**Fix:** Deleted the `overflow-x: hidden` rule (it hides symptoms;
+CC-03 fixes the cause of the overflow it was hiding), and changed
+`.filters` to stick at `top: var(--header-h)` (93px) so the bar parks
+*below* the header at every width. One custom property on `:root`
+documents how the 93 is made up (62px bar + one-line slot bar +
+border) instead of a bare magic number.
+
+**Checked:** Phone 400×800, scrolled to 600: bar stuck at [93, 325],
+fully visible under the header, search input at y107. Desktop 1280,
+scrolled: bar at [93, 199], search input clickable (it used to be
+behind the header). The open nav dropdown on phones still overlays
+correctly because it belongs to the header's stacking context.
+
+**Time:** ~30 minutes. The `overflow` ancestor rule is a classic
+sticky-breaker but easy to miss; the header-height offset came from
+re-reading the complaint ("staying *visible* at the top") and
+testing what "stuck at 0" would actually look like behind a sticky
+header.
+
 ## CC-04 — "The buttons don't work on my tablet"
 
 **Reproduced:** I resized a browser to 820×1180 (a tablet in

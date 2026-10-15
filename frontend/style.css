@@ -21,6 +21,9 @@
   --radius: 12px;
   --shadow: 0 2px 8px rgba(70, 45, 20, 0.08);
   --shadow-lg: 0 12px 40px rgba(70, 45, 20, 0.22);
+  /* .site-header = 62px bar + one-line slot bar (30px) + 1px border.
+     Sticky bars that must stay visible stick below the header. */
+  --header-h: 93px;
 }
 
 html[data-theme="dark"] {
@@ -171,7 +174,9 @@ h1, h2, h3 { margin: 0; }
   border-bottom: 1px solid var(--line);
   padding: 14px 0 0;
   position: sticky;
-  top: 0;
+  /* the header is sticky too and sits above us (z-index 50); sticking
+     at 0 would slide the whole bar out of sight behind it */
+  top: var(--header-h);
   z-index: 40;
 }
 
@@ -700,8 +705,6 @@ h1, h2, h3 { margin: 0; }
 }
 
 @media (max-width: 480px) {
-  .view { overflow-x: hidden; }
-
   .nav-toggle { display: flex; }
 
   .site-nav {
