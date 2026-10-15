@@ -39,6 +39,45 @@ order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
 make sure points and coupon uses are refunded elsewhere and this
 function should only ever touch stock.
 
+## CC-04 — "The buttons don't work on my tablet"
+
+**Reproduced:** I resized a browser to 820×1180 (a tablet in
+portrait, inside the 761–900px band the reporter's tablet hits).
+`document.elementFromPoint()` on the middle of an "Add to Cart"
+button returned the `<article class="dish-card">` itself — not the
+button. Same for the favourite star (returned `.img-wrap`). A real
+click on the button did nothing: cart count stayed 0, no toast, no
+stepper. On a 1280px window the same click works, and my 820px
+measurement showed the media query active — the tablet-only
+band was the tell.
+
+**Cause:** A block in `frontend/style.css` scoped to
+`@media (min-width: 761px) and (max-width: 900px)` draws two
+pseudo-element overlays on every dish card: `.dish-card::after`
+(bottom 58px, `z-index: 3` — the strip with the Add to Cart button)
+and `.img-wrap::after` (52×52 top-right, `z-index: 1` — over the
+star). They are `background: transparent`, so nothing looks wrong,
+but their z-index puts them above the buttons, and pseudo-elements
+receive pointer events unless told otherwise. Every click in those
+bands hit an overlay, so the delegated `[data-action]` handler never
+saw a match. Laptops (>900) and phones (≤760) never draw them —
+exactly "works on my laptop, works on my friend's phone".
+
+**Fix:** Added `pointer-events: none` to both pseudo-elements. They
+are decoration (the `.blocked` variant tints a card); decoration must
+not own the pointer. Removing the whole block would also have worked,
+but it would silently drop the blocked-card tint that exists in that
+band, and the point of a fix is not to change unrelated behaviour.
+
+**Checked:** At 820px: clicked Add to Cart on Hakka Noodles — cart
+count went to 1 and the button became the quantity stepper; clicked
+the star — `aria-pressed` toggled and the id persisted in
+localStorage. At 1280px nothing changed (media query does not apply).
+
+**Time:** ~20 minutes. Most of it was trusting the measurement over
+the screenshot: the overlays are invisible, so elementFromPoint and a
+click are the only honest evidence.
+
 ## CC-02 — "Can't read anything in dark mode"
 
 **Reproduced:** My laptop reports `prefers-color-scheme: dark`, so

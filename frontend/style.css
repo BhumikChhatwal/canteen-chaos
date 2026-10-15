@@ -1041,6 +1041,9 @@ body.is-offline .site-header { filter: grayscale(0.4); }
     position: absolute;
     background: transparent;
     transition: background 0.2s;
+    /* decorative overlays: they must never take the pointer, or they
+       sit on top of Add to Cart / the star and swallow the click */
+    pointer-events: none;
   }
 
   .dish-card::after { left: 0; right: 0; bottom: 0; height: 58px; z-index: 3; }
