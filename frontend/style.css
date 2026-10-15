@@ -753,7 +753,10 @@ h1, h2, h3 { margin: 0; }
 
 /* ------------------------------------------------------ search box */
 
-.search-wrap { position: relative; z-index: 1; flex: 1; min-width: 200px; }
+/* the suggestion dropdown hangs off this box, so it has to stack above
+   the category row (z-index 40) below it - otherwise the opaque bar
+   covers the list and eats the clicks */
+.search-wrap { position: relative; z-index: 41; flex: 1; min-width: 200px; }
 .search-wrap .search { width: 100%; }
 
 .suggest-box {

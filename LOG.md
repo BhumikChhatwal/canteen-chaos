@@ -39,6 +39,43 @@ order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
 make sure points and coupon uses are refunded elsewhere and this
 function should only ever touch stock.
 
+## CC-01 — "The search suggestions are behind everything"
+
+**Reproduced:** On a 1280px window I typed `da` in the search box.
+The dropdown appeared with 4 suggestions, but its top ~50px sat
+*behind* the orange category bar (screenshot in my notes: the first
+item, "Dal Tadka Thali", was not visible). I probed the dropdown with
+`document.elementFromPoint()` down its left edge: the top band
+returned `.cat-tabs` / `.filters`, only the lower part returned
+`suggest-item`. A real click on the first item landed at (286, 166)
+on `.cat-tabs` — no dish opened, and the click outside
+`.search-wrap` made the list close, which reads as "clicking does
+nothing".
+
+**Cause:** Stacking, not the dropdown itself. `.suggest-box` has
+`z-index: 100`, but it lives inside `.search-wrap { z-index: 1 }`, a
+stacking context — a child's z-index only competes *within* its
+parent. Sibling `.cat-tabs` is `position: relative; z-index: 40` with
+an opaque background, so the whole `.search-wrap` subtree (max 1)
+painted below the category row (40). The list hung down over the
+category bar and was covered by it.
+
+**Fix:** Raised `.search-wrap` to `z-index: 41` — one step above the
+category row inside `.filters`. The search box is the interactive
+control the dropdown belongs to; it must stack above its siblings.
+Leaving the category row at 40 is harmless (nothing else competes
+with it), so only the search box's level changed.
+
+**Checked:** elementFromPoint now returns `suggest-item` for every
+point of the dropdown, and a real click on the first suggestion opens
+the "Dal Tadka Thali" dish modal. The list still sits above the menu
+when it hangs past the filter bar, and keyboard arrows/Enter still
+work.
+
+**Time:** ~35 minutes. The interesting part was realising a child's
+z-index is trapped inside its parent's stacking context — the
+`z-index: 100` on `.suggest-box` looked correct at first glance.
+
 ## CC-06 — "I ordered more than they had"
 
 **Reproduced:** Veg Momos (id 21) had `stock 2`. I posted an order for
