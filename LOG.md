@@ -39,6 +39,57 @@ order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
 make sure points and coupon uses are refunded elsewhere and this
 function should only ever touch stock.
 
+## CC-03 — "The menu is wider than my phone"
+
+**Reproduced:** At a 481px-wide window (a phone just above the
+`max-width: 480px` block, where the grid becomes two columns) the
+menu grid computed to `257px 325px` tracks and the page's scrollWidth
+was 615 vs a 464px viewport — sideways scrolling, with the entire
+second column (Add to Cart included) hanging off the right edge, cut
+off. Measuring each card showed *why* the tracks were too wide: the
+long-named dish ("Paneer Butter Masala with Butter Naan") had a
+`.name-btn` 300px wide — its full unwrapped name — and every card's
+image contributed ~255px of min-content (its `aspect-ratio: 3/2`
+width at `height: 170px`). Grid tracks default to
+`minmax(auto, 1fr)`, so a track can never shrink below its content's
+min-content: the columns inflated until everything fit, pushing the
+page sideways. Narrower phones (≤480) hid the same overflow behind
+`.view { overflow-x: hidden }` (see CC-05) — the Add to Cart buttons
+on the right were clipped off-screen instead.
+
+**Fix:** Three parts, all in `frontend/style.css`, one per cause:
+1. All four `.menu-grid` column rules now use `minmax(0, 1fr)` so
+cards may shrink below their min-content; the card clips
+(`overflow: clip` is already set) and images cover-crop instead of
+widening the page. This is the standard cure for grid blowout.
+2. Removed `.name-btn { width: max-content }` (the ≤760px rule). It
+stopped dish names from wrapping, so a long name set its card's
+minimum width; the button is an inline-block and shrink-to-fit
+already, so the rule bought nothing and cost the layout. With it
+gone, "Paneer Butter Masala with Butter Naan" wraps to two lines
+inside a 208px card.
+3. The header row (brand + 3 links + theme + cart) measured ~590px
+and overflowed between 481–600px, adding its own sideways scroll.
+That is why the nav only collapses to a hamburger at ≤480. I moved
+the collapse breakpoint to `max-width: 600px` so the row fits
+whenever the full nav is shown.
+
+**Checked:** 481px: `scrollWidth == clientWidth`, tracks 208/208, the
+long-name card wraps and sits fully inside the screen. 320px: no
+overflow, the card keeps its 16px right padding and the Add to Cart
+button is fully visible. 1280px: unchanged 4-column layout, no
+hamburger. Because removing CC-05's `overflow-x: hidden` unmasks
+overflow everywhere, I also re-checked the other views at 320px:
+the Counter's stock rows were a five-control grid that could not fit
+one line (390px wide), so at ≤480px they now wrap (name on its own
+line) — no sideways scroll there either; the orders table still
+scrolls inside its own `.table-wrap` as designed.
+
+**Time:** ~50 minutes. Two of those were the useful kind: proving the
+blowout numerically (tracks equal to min-content, then a live
+`width: auto` injection on `.name-btn` shrinking track 2 from 325 to
+257) rather than guessing at which element was "too wide".
+
 ## CC-05 — "The category bar scrolls away on my phone"
 
 **Reproduced:** At a 400×800 viewport (≤480px, phone) I scrolled to
