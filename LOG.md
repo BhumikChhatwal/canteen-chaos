@@ -277,7 +277,7 @@ runs on the server, which the README calls the owner of the truth.
 
 **Checked:** Qty 5 with stock 2 → 400 with the message above, stock
 untouched at 2. Qty 2 → 201, stock 0, next attempt rejected as "sold
-cancelled". `reproduce.js` reports OK for both.
+out". `reproduce.js` reports OK for both.
 
 **Time:** ~25 minutes; the rest of the hour was spent making sure the
 check could not break the normal path (a stock change by staff between
@@ -375,22 +375,104 @@ definition to check rather than two.
 
 ## Could not fix
 
-For anything you investigated but did not solve. Say what you tried and
-where you got to. This is worth marks — leaving it blank when you got
-stuck is not.
+(Nothing stayed unfixed — but see "fixes I am unsure about" below for
+two decisions I would want a second opinion on.)
 
-### CC-0X — "<the complaint>"
+### Honesty note — two fixes I would flag in review
 
-**What I tried:**
+**1. The 93px sticky offset (`--header-h`).** CC-05's "bar stays
+visible" fix parks `.filters` at `top: var(--header-h)` with 93px
+computed from today's header (62px bar + one-line 30px slot bar +
+1px border). I measured it at 320–1280px and the slot bar is one line
+everywhere with the current strings — but if the slot text ever wraps
+two lines (a longer status message, browser font scaling), the header
+grows and the filter bar would tuck under it again. The robust fix is
+to measure the header once in JS and set the variable, or to make the
+header and filter bar one sticky element (which would require moving
+`.filters` out of the menu view and would show it on the other views).
+I did not do either; the CSS-only version is honest about its
+assumption and easy to replace.
 
-**Where I got to:**
-
-**What I would try next:**
-
-
+**2. Coupon use counting is check-then-write.** The decrement reads
+`coupons`, subtracts 1 and writes back. Two orders racing for the
+last advertised use of a coupon could both pass `applyCoupon()` and
+take the counter to -1 — the same class of race that stock reservation
+now guards against (CC-06's `reserveStock` re-check). In this app the
+server is single-process and synchronous between read and write, so
+the window is a few milliseconds of a hypothetical concurrent runner;
+I left it rather than restructure `store.update` for one counter. If
+this app ever ran more than one process, both stock and coupons would
+need the same transactional treatment.
 
 ## Extra credit
 
 Anything not on the bug log: a problem you found yourself, a test you
-wrote, or a fix you are unsure about. Same format, plus one line on how
-you noticed it.
+wrote, or a fix you are unsure about. Same format, plus one line on
+how you noticed it.
+
+### Unreported bug 1 — "My Orders" can never show anything
+
+**How I noticed:** While testing CC-06 I read `frontend/js/orders.js`
+to see which endpoint feeds the My Orders page; it calls
+`api.listOrders({ memberId: deviceId() })`. Then I read the server's
+`GET /api/orders` and the filter did not look like it could ever
+match.
+
+**Reproduced:** Placed an order with `X-Member-Id: dev-test-123` →
+201, response `memberId: "dev-test-123"`. Then
+`GET /api/orders?memberId=dev-test-123` → `count: 0`, empty list. In
+the browser the My Orders page shows "No orders found … This browser
+has N saved order token(s)" forever, no matter how many orders this
+device places. A student's order exists on the counter dashboard but
+is invisible to them.
+
+**Cause:** In `backend/routes/orders.routes.js` the query filter was
+`orders.filter((o) => o.memberId === req.query.userId)` — it read a
+`userId` query parameter that nothing ever sends. The filter compared
+every order's memberId with `undefined` and matched nothing, so the
+endpoint answered "this member has no orders" for every member.
+
+**Fix:** Read `req.query.memberId` — the parameter the route advertises
+and the only one the frontend sends. One word; the mistake was a
+wrong property name in exactly one place.
+
+**Checked:** After the fix the same call returns `count: 2` (both
+test orders for that member), and other members' orders are not in
+the list. The staff endpoint (`?status=…`) is unaffected.
+
+**Time:** ~10 minutes.
+
+### Unreported bug 2 — coupon uses are never counted, and cancelling
+mints new ones
+
+**How I noticed:** While writing CC-08 I followed what happens to a
+coupon after a successful order and found the placement path's
+coupon update was `{ ...c, usesLeft: c.usesLeft }` — a no-op dressed
+up as bookkeeping, while the cancel path gave a use *back*
+(`usesLeft + 1`).
+
+**Reproduced:** `BYTE10.usesLeft` started at 501. Ordered 2 Hakka
+Noodles with `couponCode: BYTE10` (discount 13.2 applied, 201) →
+usesLeft still **501**. Cancelled that order → usesLeft **502** — one
+more use than the coupon has ever had. Every use+cancel cycle mints a
+use; "This coupon is fully used" can never happen in practice, and
+cancelling dilutes the counter without limit.
+
+**Cause:** Two halves of one rule living apart: `applyCoupon()`
+enforces `usesLeft <= 0`, but nothing ever decrements the counter
+when the coupon is actually spent. The cancel path in
+`PATCH /:token/status` already assumed the decrement existed and
+reversed it, so cancelling inflated the counter.
+
+**Fix:** In `POST /api/orders`, the placeholder map now decrements
+`usesLeft` when `bill.couponCode` is set (i.e. the coupon was applied
+and charged). The cancel path's `+1` was already correct and is now
+balanced. The idempotent-replay path returns the stored order before
+this code, so a double-tapped "Place Order" still counts one use.
+
+**Checked:** Uses 501 → order with coupon → 500 → cancel → 501.
+Repeat cycles stay balanced. An expired or invalid coupon never
+reaches the decrement (pricing rejects it first), and ordering with
+no coupon does not touch the counter.
+
+**Time:** ~15 minutes.
