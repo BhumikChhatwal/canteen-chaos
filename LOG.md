@@ -10,40 +10,35 @@ Delete the example before you submit.
 
 
 
-## Example — delete this
+## CC-10 — "Sorting by price is backwards"
 
-### CC-99 — "The cart total is wrong"
+**Reproduced:** With the server running, I asked the menu endpoint for
+`?sort=price-asc&limit=48` and printed the first prices: 138.5, 135,
+133, 119.5 … — the most expensive dishes first. `price-desc` returned
+16.5, 21, 23, 26 … — the cheapest first. Same thing in the browser:
+picking "Price: low to high" in the sort dropdown showed the expensive
+dishes at the top of the grid. (`backend/test/reproduce.js` prints
+this comparison.)
 
-**Reproduced:** Added 2 dosas at Rs. 60 each. The cart showed
-Rs. 119.99999 instead of Rs. 130. Happened every time, on any dish with
-a price ending in .50.
+**Cause:** The sort table in `backend/logic/search.js` had the two
+comparators swapped: `price-asc` was defined as `b.price - a.price`
+(descending) and `price-desc` as `a.price - b.price` (ascending). Every
+sort option goes through this one table, so both price options were
+exactly inverted while `rating-desc`, `name-asc` etc. were fine.
 
-**Cause:** The total was being added up with plain floating point and
-never rounded, so 0.1 + 0.2 style errors showed up on screen. The
-rounding helper existed but this one place was not using it.
+**Fix:** Swapped the two comparator functions back in `SORTERS`. The
+comparator is the place that decides what "asc" means, and it is the
+only definition of price ordering in the app — the route and the
+browser both call `sortDishes()` — so fixing it there fixes every
+caller at once.
 
-**Fix:** Ran the total through the existing rounding helper instead of
-adding a new one, so every price on screen goes through the same path.
+**Checked:** `reproduce.js` now reports both price sorts OK; in the
+browser, "low to high" starts at Rs. 16.5 and "high to low" starts at
+Rs. 138.5. Rating and name sorts are unchanged.
 
-**Checked:** Cart, checkout and the order screen all show Rs. 130 now.
-Prices without decimals still show without a trailing .00.
-
-**Time:** about 40 minutes, most of it working out that the cart and the
-order screen round in different places.
-
-
-
-## CC-0X — "<the complaint, in short>"
-
-**Reproduced:**
-
-**Cause:**
-
-**Fix:**
-
-**Checked:**
-
-**Time:**
+**Time:** ~15 minutes. Most of it was working out that sorting only
+happens server-side (the select just sends `sort=`), so there was one
+definition to check rather than two.
 
 
 
