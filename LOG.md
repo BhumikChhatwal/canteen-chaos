@@ -39,6 +39,39 @@ order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
 make sure points and coupon uses are refunded elsewhere and this
 function should only ever touch stock.
 
+## CC-02 — "Can't read anything in dark mode"
+
+**Reproduced:** My laptop reports `prefers-color-scheme: dark`, so
+the site boots straight into dark theme (that is the "looks like this
+the moment they open the site" half of the report — `boot()` applies
+`preferredTheme()` before anything renders). I measured the computed
+colours on a dish card: name and price were `rgb(43, 33, 24)`
+(#2b2118) on the dark card `#201913` — a contrast ratio of **1.33:1**
+(effectively invisible). The meta line under the name used
+`var(--muted)` and measured 6.85:1, which is why "the grey line under
+the name is fine".
+
+**Cause:** `.dish-body` in `frontend/style.css` hard-coded
+`color: #2b2118` — the light-theme ink — instead of using the theme
+variable. The dish name, price, quantity control and Add-to-Cart label
+all inherit from `.dish-body`, so everything inside the card content
+kept the light-theme colour after the palette swapped to dark.
+
+**Fix:** Replaced the hard-coded colour with `var(--ink)`. The dark
+theme already redefines `--ink` to `#f2e8df`, so the one variable is
+the theme's job; that is exactly what every other text rule in the
+file uses. Nothing else changes in light mode because `--ink` *is*
+#2b2118 there.
+
+**Checked:** Re-measured in dark mode: name and price now
+`rgb(242, 232, 223)` on `#201913` — about 12:1. Switched back to
+light: colours byte-identical to before. The two other hard-coded
+#2b2118 uses (`.toast-warn`, `.slot-bar.rush`) sit on amber
+backgrounds in both themes and are correct as they are.
+
+**Time:** ~15 minutes, mostly confirming the other two #2b2118 uses
+were intentional.
+
 ## CC-01 — "The search suggestions are behind everything"
 
 **Reproduced:** On a 1280px window I typed `da` in the search box.
