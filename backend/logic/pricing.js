@@ -87,6 +87,12 @@ function applyCoupon(code, lines, coupons, { slot = null, now = new Date() } = {
   const coupon = coupons.find((c) => c.code.toUpperCase() === wanted);
   if (!coupon) return { valid: false, discount: 0, reason: 'Coupon not found' };
 
+  // the listing endpoint hides expired coupons, but a code typed by
+  // hand arrives here, so the expiry rule has to hold in pricing too
+  if (coupon.expiresAt && new Date(coupon.expiresAt) <= now) {
+    return { valid: false, discount: 0, reason: `${coupon.code} has expired` };
+  }
+
   if (coupon.usesLeft <= 0) {
     return { valid: false, discount: 0, reason: 'This coupon is fully used' };
   }
