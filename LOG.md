@@ -1,45 +1,86 @@
 # Debug log
 
-Your notes. One entry per bug you fixed, using the template below.
+One entry per bug: how I reproduced it on this machine, what was
+actually wrong, what I changed and why that was the right place.
+The "Could not fix" section holds the two decisions I would flag in
+code review; the extra-credit section holds two unreported bugs I
+found and the regression test for all of it.
 
-This file is read as carefully as your code. A correct fix you cannot
-explain counts for little; a bug you could not fix but investigated
-honestly still counts for something.
+The automated checks live in `backend/`:
 
-Delete the example before you submit.
+    npm test                   - the regression suite (node --test)
+    node scripts/reproduce.js  - the manual repro, needs a running
+                                 server started with TZ=UTC
 
+## CC-01 — "The search suggestions are behind everything"
 
+**Reproduced:** On a 1280px window I typed `da` in the search box.
+The dropdown appeared with 4 suggestions, but its top ~50px sat
+*behind* the orange category bar (screenshot in my notes: the first
+item, "Dal Tadka Thali", was not visible). I probed the dropdown with
+`document.elementFromPoint()` down its left edge: the top band
+returned `.cat-tabs` / `.filters`, only the lower part returned
+`suggest-item`. A real click on the first item landed at (286, 166)
+on `.cat-tabs` — no dish opened, and the click outside
+`.search-wrap` made the list close, which reads as "clicking does
+nothing".
 
-## CC-07 — "Cancelling makes it worse"
+**Cause:** Stacking, not the dropdown itself. `.suggest-box` has
+`z-index: 100`, but it lives inside `.search-wrap { z-index: 1 }`, a
+stacking context — a child's z-index only competes *within* its
+parent. Sibling `.cat-tabs` is `position: relative; z-index: 40` with
+an opaque background, so the whole `.search-wrap` subtree (max 1)
+painted below the category row (40). The list hung down over the
+category bar and was covered by it.
 
-**Reproduced:** Hakka Noodles started at stock 5. I placed an order
-for 1 → stock 4 (correct). I then cancelled that order (PATCH
-`/api/orders/<token>/status {status:'cancelled'}` → 200) and re-read
-the menu: stock was **3**, not 5. Every further cancel of another
-order would keep eating stock, exactly as the staff member described.
+**Fix:** Raised `.search-wrap` to `z-index: 41` — one step above the
+category row inside `.filters`. The search box is the interactive
+control the dropdown belongs to; it must stack above its siblings.
+Leaving the category row at 40 is harmless (nothing else competes
+with it), so only the search box's level changed.
 
-**Cause:** `releaseStock()` in `backend/logic/validation.js` — the
-function whose whole job is "put the food back on the shelf" — did
-`stock: dish.stock - line.qty`. It subtracted a second time instead of
-adding, so cancelling was effectively a second reservation. The
-caller in `orders.routes.js` was right to call it; the function itself
-had the wrong sign.
+**Checked:** elementFromPoint now returns `suggest-item` for every
+point of the dropdown, and a real click on the first suggestion opens
+the "Dal Tadka Thali" dish modal. The list still sits above the menu
+when it hangs past the filter bar, and keyboard arrows/Enter still
+work.
 
-**Fix:** Changed the subtraction to `+ line.qty` in `releaseStock()`.
-That function is the single place that reverses a reservation (the
-cancel path in the route is its only caller), so fixing the sign there
-fixes every cancellation without touching the route — keeping the
-"reservation bookkeeping lives in logic/validation.js" boundary that
-`reserveStock`/`releaseStock` are paired around.
+**Time:** ~35 minutes. The interesting part was realising a child's
+z-index is trapped inside its parent's stacking context — the
+`z-index: 100` on `.suggest-box` looked correct at first glance.
+## CC-02 — "Can't read anything in dark mode"
 
-**Checked:** Order 1 from stock 5 → 4; cancel → 5 again. A second
-order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
+**Reproduced:** My laptop reports `prefers-color-scheme: dark`, so
+the site boots straight into dark theme (that is the "looks like this
+the moment they open the site" half of the report — `boot()` applies
+`preferredTheme()` before anything renders). I measured the computed
+colours on a dish card: name and price were `rgb(43, 33, 24)`
+(#2b2118) on the dark card `#201913` — a contrast ratio of **1.33:1**
+(effectively invisible). The meta line under the name used
+`var(--muted)` and measured 6.85:1, which is why "the grey line under
+the name is fine".
 
-**Time:** ~15 minutes. Half of that was re-reading the cancel path to
-make sure points and coupon uses are refunded elsewhere and this
-function should only ever touch stock.
+**Cause:** `.dish-body` in `frontend/style.css` hard-coded
+`color: #2b2118` — the light-theme ink — instead of using the theme
+variable. The dish name, price, quantity control and Add-to-Cart label
+all inherit from `.dish-body`, so everything inside the card content
+kept the light-theme colour after the palette swapped to dark.
 
-## CC-03 — "The menu is wider than my phone"
+**Fix:** Replaced the hard-coded colour with `var(--ink)`. The dark
+theme already redefines `--ink` to `#f2e8df`, so the one variable is
+the theme's job; that is exactly what every other text rule in the
+file uses. Nothing else changes in light mode because `--ink` *is*
+#2b2118 there.
+
+**Checked:** Re-measured in dark mode: name and price now
+`rgb(242, 232, 223)` on `#201913` — about 12:1. Switched back to
+light: colours byte-identical to before. The two other hard-coded
+#2b2118 uses (`.toast-warn`, `.slot-bar.rush`) sit on amber
+backgrounds in both themes and are correct as they are.
+
+**Time:** ~15 minutes, mostly confirming the other two #2b2118 uses
+were intentional.
+## CC-03 — "The menu is wider than my phone"
 
 **Reproduced:** At a 481px-wide window (a phone just above the
 `max-width: 480px` block, where the grid becomes two columns) the
@@ -89,8 +130,45 @@ scrolls inside its own `.table-wrap` as designed.
 blowout numerically (tracks equal to min-content, then a live
 `width: auto` injection on `.name-btn` shrinking track 2 from 325 to
 257) rather than guessing at which element was "too wide".
+## CC-04 — "The buttons don't work on my tablet"
 
-## CC-05 — "The category bar scrolls away on my phone"
+**Reproduced:** I resized a browser to 820×1180 (a tablet in
+portrait, inside the 761–900px band the reporter's tablet hits).
+`document.elementFromPoint()` on the middle of an "Add to Cart"
+button returned the `<article class="dish-card">` itself — not the
+button. Same for the favourite star (returned `.img-wrap`). A real
+click on the button did nothing: cart count stayed 0, no toast, no
+stepper. On a 1280px window the same click works, and my 820px
+measurement showed the media query active — the tablet-only
+band was the tell.
+
+**Cause:** A block in `frontend/style.css` scoped to
+`@media (min-width: 761px) and (max-width: 900px)` draws two
+pseudo-element overlays on every dish card: `.dish-card::after`
+(bottom 58px, `z-index: 3` — the strip with the Add to Cart button)
+and `.img-wrap::after` (52×52 top-right, `z-index: 1` — over the
+star). They are `background: transparent`, so nothing looks wrong,
+but their z-index puts them above the buttons, and pseudo-elements
+receive pointer events unless told otherwise. Every click in those
+bands hit an overlay, so the delegated `[data-action]` handler never
+saw a match. Laptops (>900) and phones (≤760) never draw them —
+exactly "works on my laptop, works on my friend's phone".
+
+**Fix:** Added `pointer-events: none` to both pseudo-elements. They
+are decoration (the `.blocked` variant tints a card); decoration must
+not own the pointer. Removing the whole block would also have worked,
+but it would silently drop the blocked-card tint that exists in that
+band, and the point of a fix is not to change unrelated behaviour.
+
+**Checked:** At 820px: clicked Add to Cart on Hakka Noodles — cart
+count went to 1 and the button became the quantity stepper; clicked
+the star — `aria-pressed` toggled and the id persisted in
+localStorage. At 1280px nothing changed (media query does not apply).
+
+**Time:** ~20 minutes. Most of it was trusting the measurement over
+the screenshot: the overlays are invisible, so elementFromPoint and a
+click are the only honest evidence.
+## CC-05 — "The category bar scrolls away on my phone"
 
 **Reproduced:** At a 400×800 viewport (≤480px, phone) I scrolled to
 y=600 and measured: `.filters` was at viewport `[-507, -275]` — the
@@ -133,117 +211,7 @@ sticky-breaker but easy to miss; the header-height offset came from
 re-reading the complaint ("staying *visible* at the top") and
 testing what "stuck at 0" would actually look like behind a sticky
 header.
-
-## CC-04 — "The buttons don't work on my tablet"
-
-**Reproduced:** I resized a browser to 820×1180 (a tablet in
-portrait, inside the 761–900px band the reporter's tablet hits).
-`document.elementFromPoint()` on the middle of an "Add to Cart"
-button returned the `<article class="dish-card">` itself — not the
-button. Same for the favourite star (returned `.img-wrap`). A real
-click on the button did nothing: cart count stayed 0, no toast, no
-stepper. On a 1280px window the same click works, and my 820px
-measurement showed the media query active — the tablet-only
-band was the tell.
-
-**Cause:** A block in `frontend/style.css` scoped to
-`@media (min-width: 761px) and (max-width: 900px)` draws two
-pseudo-element overlays on every dish card: `.dish-card::after`
-(bottom 58px, `z-index: 3` — the strip with the Add to Cart button)
-and `.img-wrap::after` (52×52 top-right, `z-index: 1` — over the
-star). They are `background: transparent`, so nothing looks wrong,
-but their z-index puts them above the buttons, and pseudo-elements
-receive pointer events unless told otherwise. Every click in those
-bands hit an overlay, so the delegated `[data-action]` handler never
-saw a match. Laptops (>900) and phones (≤760) never draw them —
-exactly "works on my laptop, works on my friend's phone".
-
-**Fix:** Added `pointer-events: none` to both pseudo-elements. They
-are decoration (the `.blocked` variant tints a card); decoration must
-not own the pointer. Removing the whole block would also have worked,
-but it would silently drop the blocked-card tint that exists in that
-band, and the point of a fix is not to change unrelated behaviour.
-
-**Checked:** At 820px: clicked Add to Cart on Hakka Noodles — cart
-count went to 1 and the button became the quantity stepper; clicked
-the star — `aria-pressed` toggled and the id persisted in
-localStorage. At 1280px nothing changed (media query does not apply).
-
-**Time:** ~20 minutes. Most of it was trusting the measurement over
-the screenshot: the overlays are invisible, so elementFromPoint and a
-click are the only honest evidence.
-
-## CC-02 — "Can't read anything in dark mode"
-
-**Reproduced:** My laptop reports `prefers-color-scheme: dark`, so
-the site boots straight into dark theme (that is the "looks like this
-the moment they open the site" half of the report — `boot()` applies
-`preferredTheme()` before anything renders). I measured the computed
-colours on a dish card: name and price were `rgb(43, 33, 24)`
-(#2b2118) on the dark card `#201913` — a contrast ratio of **1.33:1**
-(effectively invisible). The meta line under the name used
-`var(--muted)` and measured 6.85:1, which is why "the grey line under
-the name is fine".
-
-**Cause:** `.dish-body` in `frontend/style.css` hard-coded
-`color: #2b2118` — the light-theme ink — instead of using the theme
-variable. The dish name, price, quantity control and Add-to-Cart label
-all inherit from `.dish-body`, so everything inside the card content
-kept the light-theme colour after the palette swapped to dark.
-
-**Fix:** Replaced the hard-coded colour with `var(--ink)`. The dark
-theme already redefines `--ink` to `#f2e8df`, so the one variable is
-the theme's job; that is exactly what every other text rule in the
-file uses. Nothing else changes in light mode because `--ink` *is*
-#2b2118 there.
-
-**Checked:** Re-measured in dark mode: name and price now
-`rgb(242, 232, 223)` on `#201913` — about 12:1. Switched back to
-light: colours byte-identical to before. The two other hard-coded
-#2b2118 uses (`.toast-warn`, `.slot-bar.rush`) sit on amber
-backgrounds in both themes and are correct as they are.
-
-**Time:** ~15 minutes, mostly confirming the other two #2b2118 uses
-were intentional.
-
-## CC-01 — "The search suggestions are behind everything"
-
-**Reproduced:** On a 1280px window I typed `da` in the search box.
-The dropdown appeared with 4 suggestions, but its top ~50px sat
-*behind* the orange category bar (screenshot in my notes: the first
-item, "Dal Tadka Thali", was not visible). I probed the dropdown with
-`document.elementFromPoint()` down its left edge: the top band
-returned `.cat-tabs` / `.filters`, only the lower part returned
-`suggest-item`. A real click on the first item landed at (286, 166)
-on `.cat-tabs` — no dish opened, and the click outside
-`.search-wrap` made the list close, which reads as "clicking does
-nothing".
-
-**Cause:** Stacking, not the dropdown itself. `.suggest-box` has
-`z-index: 100`, but it lives inside `.search-wrap { z-index: 1 }`, a
-stacking context — a child's z-index only competes *within* its
-parent. Sibling `.cat-tabs` is `position: relative; z-index: 40` with
-an opaque background, so the whole `.search-wrap` subtree (max 1)
-painted below the category row (40). The list hung down over the
-category bar and was covered by it.
-
-**Fix:** Raised `.search-wrap` to `z-index: 41` — one step above the
-category row inside `.filters`. The search box is the interactive
-control the dropdown belongs to; it must stack above its siblings.
-Leaving the category row at 40 is harmless (nothing else competes
-with it), so only the search box's level changed.
-
-**Checked:** elementFromPoint now returns `suggest-item` for every
-point of the dropdown, and a real click on the first suggestion opens
-the "Dal Tadka Thali" dish modal. The list still sits above the menu
-when it hangs past the filter bar, and keyboard arrows/Enter still
-work.
-
-**Time:** ~35 minutes. The interesting part was realising a child's
-z-index is trapped inside its parent's stacking context — the
-`z-index: 100` on `.suggest-box` looked correct at first glance.
-
-## CC-06 — "I ordered more than they had"
+## CC-06 — "I ordered more than they had"
 
 **Reproduced:** Veg Momos (id 21) had `stock 2`. I posted an order for
 `qty 5` and got `201 Created`; re-reading the menu showed
@@ -282,8 +250,35 @@ out". `reproduce.js` reports OK for both.
 **Time:** ~25 minutes; the rest of the hour was spent making sure the
 check could not break the normal path (a stock change by staff between
 validate and reserve, which is what point 2 covers).
+## CC-07 — "Cancelling makes it worse"
 
-## CC-08 — "An old coupon still works"
+**Reproduced:** Hakka Noodles started at stock 5. I placed an order
+for 1 → stock 4 (correct). I then cancelled that order (PATCH
+`/api/orders/<token>/status {status:'cancelled'}` → 200) and re-read
+the menu: stock was **3**, not 5. Every further cancel of another
+order would keep eating stock, exactly as the staff member described.
+
+**Cause:** `releaseStock()` in `backend/logic/validation.js` — the
+function whose whole job is "put the food back on the shelf" — did
+`stock: dish.stock - line.qty`. It subtracted a second time instead of
+adding, so cancelling was effectively a second reservation. The
+caller in `orders.routes.js` was right to call it; the function itself
+had the wrong sign.
+
+**Fix:** Changed the subtraction to `+ line.qty` in `releaseStock()`.
+That function is the single place that reverses a reservation (the
+cancel path in the route is its only caller), so fixing the sign there
+fixes every cancellation without touching the route — keeping the
+"reservation bookkeeping lives in logic/validation.js" boundary that
+`reserveStock`/`releaseStock` are paired around.
+
+**Checked:** Order 1 from stock 5 → 4; cancel → 5 again. A second
+order/cancel cycle ends at 5 again. `reproduce.js` reports OK.
+
+**Time:** ~15 minutes. Half of that was re-reading the cancel path to
+make sure points and coupon uses are refunded elsewhere and this
+function should only ever touch stock.
+## CC-08 — "An old coupon still works"
 
 **Reproduced:** With the canteen open, I quoted a Rs. 264 cart with
 `couponCode: "FRESHERS24"` (data says `expiresAt 2024-09-30`, last
@@ -311,8 +306,7 @@ normally; the coupon list is unchanged.
 
 **Time:** ~20 minutes, most of it tracing which endpoints accept a
 coupon code (quote and POST /orders both call calculateBill).
-
-## CC-09 — "The menu shows more dishes than it should"
+## CC-09 — "The menu shows more dishes than it should"
 
 **Reproduced:** `GET /api/menu?limit=5&page=1` came back with
 `total 37, pages 8, hasMore true` — but `dishes` contained all 37
@@ -340,8 +334,7 @@ paints 5 cards, and the "Load more" / scroll-sentinel path appends the
 rest 5 at a time to 37.
 
 **Time:** ~10 minutes.
-
-## CC-10 — "Sorting by price is backwards"
+## CC-10 — "Sorting by price is backwards"
 
 **Reproduced:** With the server running, I asked the menu endpoint for
 `?sort=price-asc&limit=48` and printed the first prices: 138.5, 135,
@@ -372,8 +365,7 @@ happens server-side (the select just sends `sort=`), so there was one
 definition to check rather than two.
 
 
-
-## Could not fix
+## Could not fix
 
 (Nothing stayed unfixed — but see "fixes I am unsure about" below for
 two decisions I would want a second opinion on.)
@@ -403,8 +395,7 @@ the window is a few milliseconds of a hypothetical concurrent runner;
 I left it rather than restructure `store.update` for one counter. If
 this app ever ran more than one process, both stock and coupons would
 need the same transactional treatment.
-
-## Extra credit
+## Extra credit
 
 Anything not on the bug log: a problem you found yourself, a test you
 wrote, or a fix you are unsure about. Same format, plus one line on
